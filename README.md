@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # RoadWatch GIS
 
 Local driver and government dashboard using the provided `yolo26n.pt` model, Ultralytics YOLO, and Roboflow Supervision.
@@ -29,3 +30,6 @@ Open one of these Cloudflare-friendly routes in a browser:
 The supplied `yolo26n.pt` is a general COCO model. It can detect the 80 COCO classes, but no model is perfect in every road, lighting, weather, camera-angle, or local-vehicle condition. It does **not** identify school children, read license plates, prove hit-and-run events, determine road-surface condition, or measure real traffic delay from one camera scene. For those functions, add dedicated child/crosswalk, licence-plate-detection + OCR, incident-tracking, road-defect, and traffic-speed models, then validate them on a held-out labelled dataset from the target area. Adjust the confidence slider to trade recall for fewer false positives.
 
 The road-damage model is trained for the four CRDDC2022 damage classes listed above. Validate and calibrate it on locally labelled road imagery before using its results for maintenance dispatch or safety decisions.
+=======
+# SIH_PROJECT
+>>>>>>> e40edcb841fa9c632c4ccbf3a365ada32a31c86c
