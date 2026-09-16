@@ -13,10 +13,9 @@ The system uses **Ultralytics YOLO**, **Roboflow Supervision**, and a dedicated 
 ## 🖼️ Project Preview
 
 ### 🚗 Driver Dashboard
+<img width="1920" height="1080" alt="Screenshot (448)" src="https://github.com/user-attachments/assets/6eed040c-fbdf-49c3-9c8f-37bbf22b2509" />
 
-<p align="center">
-  <img src="assets/driver-dashboard.png" width="90%" alt="MovIqSense Driver Dashboard">
-</p>
+
 
 > Real-time road-user detection with sampled video inference and Supervision-based bounding-box visualization.
 
