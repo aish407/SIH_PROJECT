@@ -1,262 +1,267 @@
-🚦 MovIqSense
+# 🚦 MovIqSense
 
-AI-Powered Intelligent Road Monitoring & Mobility Intelligence Platform
+### AI-Powered Intelligent Road Monitoring & Mobility Intelligence Platform
 
-Turning everyday vehicle cameras into intelligent road-sensing systems.
+> **Turning everyday vehicle cameras into intelligent road-sensing systems.**
 
-MovIqSense is an AI-powered road monitoring and mobility intelligence platform designed to transform vehicles such as buses and other road-going vehicles into mobile sensing units.
+MovIqSense is an **AI-powered road monitoring and mobility intelligence platform** designed to transform vehicles such as buses and other road-going vehicles into **mobile sensing units**.
 
-The platform combines Ultralytics YOLO, Roboflow Supervision, a specialized Road Damage Detection model, geolocation, and GIS visualization to generate location-aware road intelligence through separate Driver and Government dashboards.
+The system uses **Ultralytics YOLO**, **Roboflow Supervision**, and a dedicated **Road Damage Detection model** to analyze road scenes in real time, detect road users and road defects, identify potentially unsafe situations, and communicate location-based insights through separate **Driver** and **Government GIS dashboards**.
 
-🖼️ Project Preview
+---
 
-🚗 Driver Dashboard
+## 🖼️ Project Preview
 
-<p align="center">
-  <img src="assets/driver-dashboard.png" width="92%" alt="MovIqSense Driver Dashboard">
-</p>
-
-Real-time road-user detection with sampled-frame inference and Supervision-based visualization.
-
-🏛️ Government GIS Dashboard
+### 🚗 Driver Dashboard
 
 <p align="center">
-  <img src="assets/government-dashboard.png" width="92%" alt="MovIqSense Government GIS Dashboard">
+  <img src="assets/driver-dashboard.png" width="90%" alt="MovIqSense Driver Dashboard">
 </p>
 
-Location-aware visualization of reported drivers, road-user counts, safety indicators, and potential traffic-density indicators.
+> Real-time road-user detection with sampled video inference and Supervision-based bounding-box visualization.
 
-🤖 AI Detection
+---
+
+### 🗺️ Government GIS Dashboard
 
 <p align="center">
-  <img src="assets/ai-detection.png" width="92%" alt="MovIqSense AI Detection">
+  <img src="assets/government-dashboard.png" width="90%" alt="MovIqSense Government GIS Dashboard">
 </p>
 
-🎯 Problem
+> Location-aware visualization of reported drivers, road scenes, vehicle/pedestrian counts, and potential traffic-delay indicators.
 
-Traditional road monitoring often depends on fixed CCTV infrastructure and manual inspections. This can result in:
+---
 
-Limited geographic coverage
+### 🤖 AI Detection Pipeline
 
-Expensive sensing infrastructure
+<p align="center">
+  <img src="assets/ai-detection.png" width="90%" alt="MovIqSense AI Detection Pipeline">
+</p>
 
-Delayed road-defect reporting
+---
 
-Fragmented traffic information
+# 🎯 Problem
 
-Difficulty monitoring large road networks continuously
+Traditional road monitoring systems often depend on:
 
-💡 Our Approach
+* Fixed CCTV infrastructure
+* Manual road inspections
+* Limited geographic coverage
+* Expensive dedicated sensing infrastructure
+* Delayed reporting of road defects
+* Fragmented traffic and safety information
 
-MovIqSense turns participating vehicles into mobile road-sensing units.
+This makes it difficult for authorities to continuously understand what is happening across a large road network.
 
-Vehicle cameras observe the road while lightweight AI models process sampled frames and produce road-user and road-condition intelligence. Relevant information can then be visualized geographically for government and operational teams.
+### 💡 Our Approach
 
-🚀 Core Features
+Instead of installing expensive sensors everywhere, **MovIqSense turns participating vehicles into mobile road-sensing units**.
 
-Feature
+A vehicle camera can continuously observe its surroundings while lightweight AI models process sampled frames and send relevant intelligence to a centralized dashboard.
 
-Description
+---
 
-🎥 Video Analysis
+# 🚀 What MovIqSense Does
 
-Upload a road video and analyze sampled frames
+MovIqSense combines **computer vision + geolocation + GIS visualization** into one platform.
 
-📷 Browser Camera
+### 👨‍✈️ Driver Side
 
-Analyze live camera input from the browser
+The driver dashboard can:
 
-🚗 Object Detection
+* 🎥 Upload and analyze road videos
+* 📷 Access the browser camera
+* 🚗 Detect road users in real time
+* 🧍 Detect pedestrians and vehicles
+* 🛣️ Detect road-damage categories
+* 📍 Capture the driver's current location
+* ⚠️ Generate safety indicators
+* 📊 Display real-time detection information
 
-Detect vehicles, pedestrians and other COCO objects
+### 🏛️ Government Side
 
-🛣️ Road Damage Detection
+The government dashboard can:
 
-Detect cracks and potholes using a dedicated RDD model
+* 🗺️ Visualize reported driver locations
+* 📍 Display location-based road intelligence
+* 🚗 Track vehicle scene counts
+* 🧍 Track pedestrian scene counts
+* 🚦 Identify high-density road scenes
+* ⚠️ Surface potential safety situations
+* 📊 Provide an operational overview of road conditions
 
-📍 Driver Location
+---
 
-Capture browser-provided latitude and longitude
+# 🧠 AI Architecture
 
-🗺️ GIS Dashboard
+MovIqSense uses a **dual-model computer vision pipeline**.
 
-Visualize reported driver locations using OpenStreetMap
+```text
+                    ┌─────────────────────┐
+                    │   Vehicle Camera    │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ Frame Sampling      │
+                    │ ≤ 960px             │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                 ┌──────────────────────────┐
+                 │     Inference Lock       │
+                 └────────────┬─────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               ▼                             ▼
+      ┌─────────────────┐          ┌────────────────────┐
+      │ YOLO26n         │          │ YOLOv8 Small RDD   │
+      │ General Objects │          │ Road Damage Model   │
+      └────────┬────────┘          └──────────┬─────────┘
+               │                              │
+               ▼                              ▼
+       Vehicles / People              Cracks / Potholes
+               │                              │
+               └──────────────┬───────────────┘
+                              ▼
+                    ┌─────────────────────┐
+                    │ Supervision Layer   │
+                    │ Bounding Boxes      │
+                    │ Object Processing   │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    ▼                     ▼
+             Driver Dashboard      Government GIS
+```
 
-🚨 Safety Alerts
+---
 
-Surface pedestrian/vehicle and high-density indicators
+# 🤖 AI Models
 
-📊 Scene Analytics
+## 1. YOLO26n — Real-Time Road User Detection
 
-Display vehicle and pedestrian counts
+The supplied `yolo26n.pt` model is used as the primary real-time object detector.
 
-⚡ Performance Control
+It can detect the standard **COCO object classes**, including road-relevant objects such as:
 
-Coordinate two AI models through a single inference lock
+* 🚗 Cars
+* 🚌 Buses
+* 🚚 Trucks
+* 🏍️ Motorcycles
+* 🚲 Bicycles
+* 🧍 People
 
-🎚️ Confidence Control
+The lightweight model is used to maintain responsive real-time inference.
 
-Adjust detection confidence to trade recall for fewer false positives
+---
 
-🧠 AI Architecture
+## 2. YOLOv8 Small — Road Damage Detection
 
-                         ┌──────────────────────┐
-                         │    Vehicle Camera    │
-                         └──────────┬───────────┘
-                                    │
-                                    ▼
-                         ┌──────────────────────┐
-                         │   Frame Sampling     │
-                         │     ≤ 960 px         │
-                         └──────────┬───────────┘
-                                    │
-                                    ▼
-                         ┌──────────────────────┐
-                         │    Inference Lock    │
-                         └──────────┬───────────┘
-                                    │
-                    ┌───────────────┴────────────────┐
-                    │                                │
-                    ▼                                ▼
-          ┌───────────────────┐          ┌────────────────────┐
-          │     YOLO26n       │          │ YOLOv8 Small RDD   │
-          │ General Detection │          │ Road Damage Model  │
-          └─────────┬─────────┘          └──────────┬─────────┘
-                    │                                │
-                    ▼                                ▼
-            Vehicles / People                Cracks / Potholes
-                    │                                │
-                    └──────────────┬─────────────────┘
-                                   ▼
-                         ┌──────────────────────┐
-                         │ Roboflow Supervision │
-                         │ Boxes + Processing   │
-                         └──────────┬───────────┘
-                                    │
-                       ┌────────────┴────────────┐
-                       ▼                         ▼
-                Driver Dashboard        Government GIS
-                       │                         │
-                       └────────────┬────────────┘
-                                    ▼
-                           Road Intelligence
+MovIqSense additionally uses:
 
-🤖 AI Models
-
-1. YOLO26n — Real-Time Road User Detection
-
-The supplied yolo26n.pt model is the primary real-time object detector.
-
-It can detect standard COCO classes, including road-relevant objects such as:
-
-🚗 Car
-
-🚌 Bus
-
-🚚 Truck
-
-🏍️ Motorcycle
-
-🚲 Bicycle
-
-🧍 Person
-
-The lightweight model is used to keep inference responsive during video/camera analysis.
-
-2. YOLOv8 Small — Road Damage Detection
-
-The project additionally uses:
-
+```text
 models/YOLOv8_Small_RDD.pt
+```
 
-The model detects four Road Damage Detection categories:
+This model independently detects four road-damage categories:
 
-Class
+| Class              | Description                                    |
+| ------------------ | ---------------------------------------------- |
+| Longitudinal Crack | Cracks running along the road                  |
+| Transverse Crack   | Cracks crossing the road direction             |
+| Alligator Crack    | Network-like interconnected cracking           |
+| Pothole            | Depressions / damaged sections of road surface |
 
-Description
+This allows general road-user detection and road-condition detection to operate as **separate specialized AI tasks**.
 
-Longitudinal Crack
+---
 
-Cracks running along the road
+# ⚡ Performance Optimization
 
-Transverse Crack
+Running multiple AI models simultaneously can cause unnecessary GPU/CPU contention.
 
-Cracks crossing the road direction
+MovIqSense therefore coordinates inference through a **single inference lock**.
 
-Alligator Crack
+### Inference Strategy
 
-Interconnected network-like cracking
-
-Pothole
-
-Depressed/damaged road sections
-
-⚡ Performance-Aware Dual Inference
-
-Running multiple models concurrently can create unnecessary CPU/GPU contention.
-
-MovIqSense therefore coordinates inference through a single inference lock.
-
-Strategy
-
+```text
 Incoming Frame
       │
       ▼
 YOLO26n Object Detection
       │
-      ├──────────────► Vehicle / Pedestrian Results
+      ▼
+Road-user results
       │
-      └── Every ~3 seconds
-                    │
-                    ▼
-            Road Damage Model
-                    │
-                    ▼
-            Damage Results
+      └──────► Every ~3 seconds
+                     │
+                     ▼
+             Road Damage Model
+                     │
+                     ▼
+             Damage results
+```
 
-Object inference runs first. Road-damage inference runs periodically using the same inference lock.
+### Why?
 
-This helps:
+Instead of running both models concurrently:
 
-Prevent concurrent model execution
+* Object detection gets priority
+* Road-damage inference runs periodically
+* Duplicate inference contention is reduced
+* CPU/GPU resources are used more efficiently
+* The source video remains smoother
 
-Reduce CPU/GPU contention
+---
 
-Avoid duplicate processing
+# 🎥 Smooth Video + AI Inference
 
-Preserve smoother source-video playback
+A key design decision in MovIqSense is separating:
 
-🎥 Smooth Video + AI Processing
+### 🎬 Video Playback
 
-MovIqSense separates video playback from AI inference.
+from
 
-                 Original Video
-                       │
-             ┌─────────┴─────────┐
-             ▼                   ▼
-      Smooth Playback       Sampled Frames
-                                 │
-                                 ▼
-                           Resize ≤ 960 px
-                                 │
-                                 ▼
-                            AI Inference
-                                 │
-                                 ▼
-                         Detection Results
+### 🧠 AI Processing
 
-Instead of sending every full-resolution frame to the AI pipeline, sampled frames are resized and processed.
+The original video is kept smooth for the driver while **sampled frames** are sent to the AI pipeline.
 
-This provides a practical balance between:
+```text
+Original Video
+      │
+      ├──────────────► Smooth Browser Playback
+      │
+      ▼
+Sample Frames
+      │
+      ▼
+Resize ≤ 960px
+      │
+      ▼
+YOLO Inference
+      │
+      ▼
+Detection Results
+```
 
-Real-time responsiveness ↔ AI processing capability
+This reduces unnecessary computation while preserving a responsive user experience.
 
-📍 Location Intelligence
+---
 
-The Driver Dashboard provides a Get Current Location function.
+# 📍 Location Intelligence
 
-The browser requests permission and sends the driver's coordinates to the local service.
+The driver dashboard provides:
 
+### `Get Current Location`
+
+The browser requests location permission and sends the driver's coordinates to the local service.
+
+The government dashboard can then visualize reported driver positions on a map.
+
+### Location Flow
+
+```text
 Driver Browser
       │
       ▼
@@ -270,119 +275,99 @@ Local Service
       │
       ▼
 Government GIS Dashboard
+```
 
-🗺️ Government GIS Dashboard
+---
 
-The Government Dashboard combines road observations with geographic context.
+# 🗺️ Government GIS Dashboard
 
-It can display:
+The government interface provides a centralized view of road intelligence.
 
-📍 Reported driver locations
+It combines:
 
-🚗 Vehicle scene counts
+* 📍 Driver locations
+* 🚗 Vehicle counts
+* 🧍 Pedestrian counts
+* ⚠️ Safety indicators
+* 🚦 Vehicle-density indicators
+* 🗺️ OpenStreetMap visualization
 
-🧍 Pedestrian scene counts
+This can help authorities identify **locations requiring further operational investigation**.
 
-⚠️ Safety indicators
+---
 
-🚦 Vehicle-density indicators
+# 🚨 Intelligent Safety Alerts
 
-🗺️ OpenStreetMap visualization
+MovIqSense can surface situations such as:
 
-The goal is to provide a centralized operational view of distributed road observations.
+### Pedestrian + Vehicle Presence
 
-🚨 Intelligent Safety Indicators
+A scene containing both pedestrians and vehicles can generate a safety indicator.
 
-MovIqSense can generate safety indicators when:
+### High Density
 
-Pedestrian + Vehicle Scene
+A high concentration of detected road users can generate a potential congestion/delay indicator.
 
-A scene containing pedestrians and vehicles can generate a potential safety alert.
+> ⚠️ These are **AI-generated indicators, not definitive conclusions**. Operational verification is required before using them for enforcement, traffic control, or maintenance decisions.
 
-High Vehicle/Pedestrian Density
+---
 
-A high detected object density can generate a potential congestion/delay indicator.
+# 📊 Traffic Density Heuristic
 
-Important: These are AI-generated indicators and require operational verification. They are not proof of an incident, violation, or actual traffic delay.
+MovIqSense uses a clearly labelled **vehicle-density heuristic** to identify potentially delayed/high-density scenes.
 
-📊 Vehicle Density Heuristic
+Conceptually:
 
-The platform uses a clearly labelled vehicle-density heuristic.
-
+```text
 Detected Vehicles
-        │
-        ▼
-Scene Density Estimate
-        │
-        ▼
+        +
+Scene Observation
+        ↓
+Vehicle Density Estimate
+        ↓
 Threshold Evaluation
-        │
-        ▼
+        ↓
 Potential Delay Indicator
+```
 
-A single camera scene cannot reliably establish real traffic delay. Accurate traffic analytics would require additional information such as:
+This is intentionally treated as an **indicator rather than a direct measurement of traffic speed or travel time**.
 
-Vehicle trajectories
+A single camera scene cannot reliably establish actual traffic delay without additional information such as:
 
-GPS movement
+* Vehicle trajectories
+* Camera calibration
+* GPS movement
+* Speed estimation
+* Multi-frame tracking
+* Historical traffic data
 
-Speed estimation
+---
 
-Multi-frame tracking
+# 🧩 Technology Stack
 
-Camera calibration
+| Layer                   | Technology                   |
+| ----------------------- | ---------------------------- |
+| AI Detection            | Ultralytics YOLO             |
+| Road Damage Detection   | YOLOv8 Small RDD             |
+| Computer Vision         | OpenCV                       |
+| Detection Visualization | Roboflow Supervision         |
+| Mapping                 | OpenStreetMap                |
+| Frontend                | Browser-based Dashboard      |
+| Backend                 | Local Python Service         |
+| Video Processing        | OpenCV / Browser Video       |
+| Location                | Browser Geolocation API      |
+| GIS                     | Interactive Map Dashboard    |
+| Deployment / Tunneling  | Cloudflare-compatible routes |
 
-Historical traffic data
+---
 
-🧩 Technology Stack
+# 📁 Project Structure
 
-Layer
-
-Technology
-
-AI Detection
-
-Ultralytics YOLO
-
-Road Damage
-
-YOLOv8 Small RDD
-
-Computer Vision
-
-OpenCV
-
-Detection Visualization
-
-Roboflow Supervision
-
-Mapping
-
-OpenStreetMap
-
-Location
-
-Browser Geolocation API
-
-Video Processing
-
-Browser Video / OpenCV
-
-Backend
-
-Local Python Service
-
-Dashboard
-
-Web-based UI
-
-Tunnel / Demo Access
-
-Cloudflare-compatible setup
-
-📁 Project Structure
-
+```text
 MovIqSense/
+│
+├── models/
+│   └── YOLOv8_Small_RDD.pt
 │
 ├── assets/
 │   ├── driver-dashboard.png
@@ -390,291 +375,296 @@ MovIqSense/
 │   ├── ai-detection.png
 │   └── architecture.png
 │
-├── models/
-│   └── YOLOv8_Small_RDD.pt
-│
 ├── yolo26n.pt
+│
 ├── start-dashboard.ps1
+│
+├── app/
+│   ├── ...
+│   └── ...
+│
 ├── requirements.txt
-├── README.md
-└── app/
-    └── ...
+│
+└── README.md
+```
 
-Update the app/ section to match your repository's actual folder structure.
+> Adjust the `app/` structure above to match your actual repository folders/files.
 
-🛠️ Installation
+---
 
-1. Clone the Repository
+# 🛠️ Installation & Setup
 
+## 1. Clone the Repository
+
+```powershell
 git clone <YOUR_REPOSITORY_URL>
 cd MovIqSense
+```
 
-2. Install Dependencies
+---
 
+## 2. Install Dependencies
+
+If your repository contains `requirements.txt`:
+
+```powershell
 pip install -r requirements.txt
+```
 
-3. Verify Model Files
+---
 
-Make sure these files exist:
+## 3. Verify Model Files
 
+Make sure the following files are available:
+
+```text
 yolo26n.pt
 models/YOLOv8_Small_RDD.pt
+```
 
-▶️ Start the Dashboard
+---
 
-Open PowerShell in the project directory:
+# ▶️ Start MovIqSense
 
+Open PowerShell inside the project directory:
+
+```powershell
 .\start-dashboard.ps1
+```
 
-The local service runs on:
+The local service will start on:
 
+```text
 http://127.0.0.1:8000
+```
 
-🌐 Dashboard Routes
+---
 
-🚗 Driver Dashboard
+# 🌐 Dashboards
 
+### 🚗 Driver Dashboard
+
+```text
 http://127.0.0.1:8000/driver
+```
 
-Driver workflow:
+The driver can:
 
-Upload a road video or start the browser camera
+1. Upload a road video
+2. Start browser-camera analysis
+3. View AI detections
+4. Adjust confidence threshold
+5. Share current location
+6. Observe safety indicators
 
-View real-time detections
+---
 
-Adjust confidence threshold
+### 🏛️ Government GIS Dashboard
 
-Capture current location
-
-Observe safety indicators
-
-Review detected road conditions
-
-🏛️ Government GIS Dashboard
-
+```text
 http://127.0.0.1:8000/government
+```
 
-Government workflow:
+The government dashboard provides:
 
-View reported driver locations
+1. Driver-location visualization
+2. Road-user statistics
+3. Pedestrian/vehicle scene information
+4. Potential density indicators
+5. Safety alerts
+6. Map-based road intelligence
 
-Inspect vehicle/pedestrian scene counts
+---
 
-Review potential density indicators
+# ☁️ Cloudflare-Friendly Access
 
-View safety alerts
+The application is designed so the local service can be exposed through a Cloudflare-compatible tunnel when required.
 
-Analyze road intelligence geographically
+This allows demonstrations from another device without deploying the complete application to a public cloud environment.
 
-☁️ Cloudflare-Friendly Demonstration
+> For production deployment, authentication, HTTPS, access control, rate limiting, and secure data handling should be implemented.
 
-The application is designed to work with a Cloudflare-compatible tunnel when remote demonstration is required.
+---
 
-This makes it possible to expose the local dashboard for testing from another device without immediately deploying the entire application to public cloud infrastructure.
+# 🎯 Key Innovations
 
-For production deployment, implement:
+## 1. 🚌 Vehicles as Mobile Sensors
 
-HTTPS
+Instead of depending exclusively on fixed CCTV infrastructure, vehicles can become **mobile sensing units**.
 
-Authentication
+---
 
-Role-based access control
-
-Secure data handling
-
-Rate limiting
-
-Persistent storage
-
-Audit logging
-
-🎯 Innovation
-
-1. 🚌 Vehicles as Mobile Sensors
-
-Instead of relying only on fixed CCTV infrastructure, participating vehicles can act as mobile sensing units.
-
-2. 🧠 Dual-Model Computer Vision
+## 2. 🧠 Dual AI Model Architecture
 
 General road-user detection and specialized road-damage detection are handled by separate models.
 
-General Vision
-      +
-Road Damage Vision
-      ↓
+```text
+General Vision Model
+        +
+Specialized Road Model
+        ↓
 Combined Road Intelligence
+```
+
+---
+
+## 3. ⚡ Resource-Aware Inference
+
+The system avoids running computationally expensive road-damage inference on every frame.
+
+This enables a practical balance between:
+
+**Real-time responsiveness ↔ AI detection capability**
+
+---
+
+## 4. 📍 Location-Aware Intelligence
+
+AI detections become more useful when associated with geographic context.
+
+```text
+Detection
+   +
+Location
+   +
+Timestamp
+   ↓
+Geospatial Road Intelligence
+```
 
-3. ⚡ Resource-Aware Inference
+---
 
-Road-damage inference is intentionally throttled instead of being executed on every frame.
+## 5. 🗺️ Driver → Government Intelligence Pipeline
 
-4. 📍 Geospatial Intelligence
+```text
+                     DRIVER
+                       │
+                Camera / Video
+                       │
+                       ▼
+                 AI Inference
+                       │
+            ┌──────────┴──────────┐
+            │                     │
+       Road Users            Road Damage
+            │                     │
+            └──────────┬──────────┘
+                       │
+                 Location Data
+                       │
+                       ▼
+                 LOCAL SERVICE
+                       │
+                       ▼
+               GOVERNMENT GIS
+                       │
+                       ▼
+             OPERATIONAL INSIGHT
+```
+
+---
+
+# 📈 Potential Real-World Applications
+
+MovIqSense can be extended for:
+
+* 🛣️ Road maintenance monitoring
+* 🕳️ Pothole reporting
+* 🚦 Traffic observation
+* 🚶 Pedestrian safety monitoring
+* 🚌 Smart public transport
+* 🏙️ Smart-city infrastructure
+* 📍 Geographic road-condition mapping
+* 🚧 Roadwork monitoring
+* 🌧️ Waterlogging detection
+* 📊 Municipal road analytics
+
+---
+
+# 🔮 Future Enhancements
+
+### Advanced Computer Vision
+
+* Dedicated pedestrian/child detection
+* Crosswalk detection
+* Traffic-sign recognition
+* Waterlogging detection
+* Lane/road-divider detection
+* Road-condition segmentation
+
+### Vehicle Intelligence
+
+* License-plate detection + OCR
+* Vehicle tracking
+* Multi-object tracking
+* Incident trajectory analysis
+* Wrong-way detection
+
+### Traffic Intelligence
+
+* Speed estimation
+* Average travel-time estimation
+* Multi-camera vehicle tracking
+* Historical congestion analysis
+* Traffic-flow prediction
 
-A detection becomes more operationally useful when associated with:
+### AI + GIS
 
-Detection + Location + Timestamp
-              ↓
-      Geospatial Intelligence
+* Road-damage heatmaps
+* Automatic maintenance prioritization
+* Geographic clustering of defects
+* Historical road-condition trends
+* Route-level analytics
 
-5. 🏛️ Driver → Government Pipeline
+### Infrastructure
 
-Driver Camera
-     │
-     ▼
-AI Detection
-     │
- ┌───┴─────────────┐
- ▼                 ▼
-Road Users     Road Damage
- └───────┬─────────┘
-         ▼
-   Location Data
-         │
-         ▼
-   Local Service
-         │
-         ▼
- Government GIS
-         │
-         ▼
-Operational Insight
+* Cloud deployment
+* Authentication
+* Role-based government access
+* Database-backed incident storage
+* Edge AI deployment
+* Model monitoring and drift detection
 
-🌍 Potential Applications
+---
 
-MovIqSense can be extended to support:
+# 🔐 Accuracy & Responsible AI
 
-🛣️ Road maintenance monitoring
+The supplied `yolo26n.pt` is a **general COCO object-detection model**.
 
-🕳️ Pothole reporting
+Although it can detect standard COCO classes, it is not specifically trained to:
 
-🚦 Traffic observation
+* Identify school children
+* Read license plates
+* Prove hit-and-run incidents
+* Determine road-surface quality
+* Measure actual traffic delay from a single camera scene
 
-🚶 Pedestrian safety monitoring
+Similarly, the road-damage model should be **validated and calibrated against locally labelled road imagery** before its predictions are used for maintenance dispatch or safety-critical decisions.
 
-🚌 Smart public transportation
+Model performance can vary depending on:
 
-🏙️ Smart-city infrastructure
-
-📍 Geographic road-condition mapping
-
-🚧 Roadwork monitoring
-
-🌧️ Waterlogging detection
-
-📊 Municipal road analytics
-
-🔮 Future Enhancements
-
-Advanced Computer Vision
-
-Dedicated child/pedestrian detection
-
-Crosswalk detection
-
-Traffic-sign recognition
-
-Waterlogging detection
-
-Road-divider detection
-
-Road-condition segmentation
-
-Vehicle Intelligence
-
-License-plate detection + OCR
-
-ByteTrack / multi-object tracking
-
-Vehicle trajectory analysis
-
-Wrong-way detection
-
-Incident tracking
-
-Traffic Intelligence
-
-Speed estimation
-
-Travel-time estimation
-
-Multi-camera tracking
-
-Historical congestion analysis
-
-Traffic-flow prediction
-
-AI + GIS
-
-Road-damage heatmaps
-
-Geographic clustering
-
-Maintenance prioritization
-
-Historical road-condition trends
-
-Route-level analytics
-
-Production Infrastructure
-
-Cloud deployment
-
-Authentication
-
-Government role-based access
-
-Database-backed incident storage
-
-Edge AI deployment
-
-Model monitoring and drift detection
-
-🔐 Accuracy & Responsible AI
-
-The supplied yolo26n.pt is a general COCO object-detection model.
-
-It does not inherently:
-
-Identify school children
-
-Read license plates
-
-Prove hit-and-run events
-
-Determine road-surface condition
-
-Measure actual traffic delay from one camera scene
-
-The road-damage model should also be validated and calibrated against locally labelled road imagery before its predictions are used for maintenance dispatch or safety-critical decisions.
-
-Performance can vary with:
-
-Lighting
-
-Weather
-
-Camera angle
-
-Image quality
-
-Vehicle speed
-
-Occlusion
-
-Road type
-
-Local scene characteristics
+* Lighting
+* Weather
+* Camera angle
+* Image quality
+* Vehicle speed
+* Occlusion
+* Road type
+* Local vehicle characteristics
 
 The confidence threshold can be adjusted to balance:
 
-Higher recall ↔ fewer false positives
+**Higher recall ↔ fewer false positives**
 
-🧪 Recommended Validation
+---
 
-Before real-world deployment, evaluate the system on a held-out dataset representing the target area.
+# 🧪 Recommended Validation
 
-Recommended metrics:
+Before real-world deployment, evaluate the system on a **held-out dataset collected from the target geographic area**.
 
+Useful metrics include:
+
+```text
 Precision
 Recall
 mAP@50
@@ -683,91 +673,147 @@ FPS
 Inference Latency
 False Positive Rate
 False Negative Rate
+```
 
-For road damage, evaluate each damage category independently.
+For road-damage detection, evaluate each damage category independently.
 
-For traffic analytics, compare predictions against ground truth such as:
+For traffic analytics, validate predictions against ground-truth measurements such as:
 
-Actual vehicle counts
+* Actual vehicle counts
+* GPS speed
+* Traffic-camera observations
+* Travel time
+* Manually labelled road conditions
 
-GPS speed
+---
 
-Traffic-camera observations
+# 🏆 Why MovIqSense?
 
-Travel time
+MovIqSense is not simply a video object detector.
 
-Manually labelled road conditions
+It combines:
 
-📌 Project Status
-
-Component
-
-Status
-
-Driver Dashboard
-
-✅ Implemented
-
-Government GIS Dashboard
-
-✅ Implemented
-
-YOLO Object Detection
-
-✅ Implemented
-
+```text
+Computer Vision
+       +
 Road Damage Detection
-
-✅ Implemented
-
-Browser Camera
-
-✅ Implemented
-
-Video Upload
-
-✅ Implemented
-
+       +
 Geolocation
-
-✅ Implemented
-
-OpenStreetMap Mapping
-
-✅ Implemented
-
+       +
+GIS
+       +
 Safety Indicators
+       +
+Government Dashboard
+```
 
-✅ Implemented
+into a single **mobile road-intelligence ecosystem**.
 
-Density Heuristic
+### From:
 
-✅ Implemented
+> **"A camera sees the road."**
 
-Advanced Tracking
+### To:
 
-🔄 Planned
+> **"A distributed fleet of vehicles continuously generates actionable road intelligence."**
 
-License Plate OCR
+---
 
-🔄 Planned
+# 👥 Target Users
 
-Speed Estimation
+### 🚗 Drivers / Fleet Operators
 
-🔄 Planned
+Receive real-time visual intelligence and safety indicators.
 
-Cloud Production Deployment
+### 🏛️ Municipal & Government Authorities
 
-🔄 Planned
+Visualize geographically distributed road observations.
 
-🏆 Project Vision
+### 🚍 Public Transport Operators
 
-MovIqSense aims to build a scalable AI-driven road intelligence network where vehicles become mobile sensors and every journey can contribute to safer, smarter, and more responsive cities.
+Use buses as mobile sensing platforms.
 
-🚦 Sense the Road. Understand the City. Improve Mobility.
+### 🛣️ Road Maintenance Teams
 
-📜 License
+Identify locations requiring road-condition verification.
 
-Add your preferred project license here, for example:
+### 🏙️ Smart City Teams
 
+Integrate road observations into broader urban mobility systems.
+
+---
+
+# 📌 Project Status
+
+| Component                   | Status        |
+| --------------------------- | ------------- |
+| Driver Dashboard            | ✅ Implemented |
+| Government GIS Dashboard    | ✅ Implemented |
+| YOLO Object Detection       | ✅ Implemented |
+| Road Damage Detection       | ✅ Implemented |
+| Browser Camera              | ✅ Implemented |
+| Video Upload                | ✅ Implemented |
+| Geolocation                 | ✅ Implemented |
+| OSM Mapping                 | ✅ Implemented |
+| Safety Indicators           | ✅ Implemented |
+| Density Heuristic           | ✅ Implemented |
+| Advanced Vehicle Tracking   | 🔄 Future     |
+| License Plate OCR           | 🔄 Future     |
+| Speed Estimation            | 🔄 Future     |
+| Cloud Production Deployment | 🔄 Future     |
+
+---
+
+# 🚀 Quick Start
+
+```powershell
+# Clone
+git clone <YOUR_REPOSITORY_URL>
+
+# Enter project
+cd MovIqSense
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start dashboard
+.\start-dashboard.ps1
+```
+
+Then open:
+
+```text
+Driver:
+http://127.0.0.1:8000/driver
+
+Government:
+http://127.0.0.1:8000/government
+```
+
+---
+
+# 📜 License
+
+Add your project's license here.
+
+For example:
+
+```text
 MIT License
+```
+
+---
+
+# 💡 Vision
+
+> **MovIqSense aims to build a scalable, AI-driven road intelligence network where vehicles become mobile sensors and every journey can contribute to safer, smarter, and more responsive cities.**
+
+---
+
+<p align="center">
+
+### 🚦 MovIqSense
+
+**Sense the Road. Understand the City. Improve Mobility.**
+
+</p>
