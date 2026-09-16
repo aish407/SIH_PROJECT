@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoadWatch GIS</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header><div><span class="eyebrow">PUBLIC SAFETY OPERATIONS</span><h1>RoadWatch GIS</h1></div><div class="status"><i></i> Local AI service online</div></header>
+  <nav><button class="tab active" data-panel="driver">Driver dashboard</button><button class="tab" data-panel="government">Government dashboard</button></nav>
+  <main>
+    <section id="driver" class="panel active">
+      <div class="section-heading"><div><span class="eyebrow">FIELD DEVICE</span><h2>Driver detection console</h2></div><p>Use an uploaded video or your camera. Every sampled frame is analyzed with YOLO and annotated using Supervision.</p></div>
+      <div class="driver-grid">
+        <article class="card controls"><h3>Session controls</h3>
+          <label>Driver / vehicle ID<input id="driverId" value="Driver-001" maxlength="80"></label>
+          <label>Detection confidence <output id="confidenceValue">35%</output><input id="confidence" type="range" min="5" max="95" value="35"></label>
+          <div class="button-row"><button id="locationButton" class="secondary">Get current location</button><span id="locationStatus">Location not shared</span></div>
+          <label class="upload">Upload a video<input id="videoFile" type="file" accept="video/*"></label>
+          <div class="button-row"><button id="cameraButton">Start live camera</button><button id="stopButton" class="danger" disabled>Stop</button></div>
+          <p class="hint">For best results, keep the camera steady and increase confidence to reduce weak detections.</p>
+        </article>
+        <article class="card live-card"><div class="card-title"><h3>Live annotated feed</h3><span id="feedStatus">Idle</span></div><div class="viewer"><video id="sourceVideo" muted playsinline></video><img id="annotatedFrame" alt="Annotated detection feed"><div id="emptyFeed">Choose a video or start the camera.</div></div><canvas id="captureCanvas" hidden></canvas></article>
+        <article class="card result-card"><h3>Detected classes</h3><div id="metric"><b>0</b><span>objects in latest frame</span></div><div id="detections" class="detections"><p>No detections yet.</p></div></article>
+      </div>
+    </section>
+    <section id="government" class="panel">
+      <div class="section-heading"><div><span class="eyebrow">COMMAND CENTER</span><h2>Government GIS dashboard</h2></div><p>Locations and the latest annotated driver frame refresh automatically.</p></div>
+      <div class="government-grid"><article class="card map-card"><div id="map"></div></article><article class="card fleet-card"><div class="card-title"><h3>Active drivers</h3><span id="fleetCount">0 online</span></div><div id="fleetList" class="fleet-list"><p>No drivers have reported yet.</p></div></article></div>
+    </section>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

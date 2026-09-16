@@ -1,0 +1,19 @@
+{
+  "settings_version": "0.0.8",
+  "datasets_dir": "C:\\Users\\datasets",
+  "weights_dir": "C:\\Users\\Aishwarya\\weights",
+  "runs_dir": "C:\\Users\\Aishwarya\\runs",
+  "uuid": "5bfcfed5d744d77445f1e826a72c066e0230f5437a13cd4e52d1d8eb3ff8d0c2",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "mlflow": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
