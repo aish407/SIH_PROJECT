@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor
 import os
 import shutil
@@ -14,15 +15,71 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
-import supervision as sv
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.platypus import Image as PdfImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+try:
+    import supervision as sv
+except ModuleNotFoundError:
+    # The project can still run on a machine where the optional Supervision
+    # package is not installed. This small OpenCV-compatible fallback preserves
+    # the same detection data and keeps live bounding boxes visible.
+    class _FallbackDetections:
+        def __init__(self, xyxy: np.ndarray, confidence: np.ndarray, class_id: np.ndarray):
+            self.xyxy = xyxy
+            self.confidence = confidence
+            self.class_id = class_id
+
+        @classmethod
+        def from_ultralytics(cls, result: Any) -> "_FallbackDetections":
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
+                return cls(np.empty((0, 4), dtype=np.float32), np.empty(0, dtype=np.float32), np.empty(0, dtype=np.int32))
+            return cls(
+                boxes.xyxy.detach().cpu().numpy(),
+                boxes.conf.detach().cpu().numpy(),
+                boxes.cls.detach().cpu().numpy().astype(np.int32),
+            )
+
+    class _FallbackBoxAnnotator:
+        def __init__(self, thickness: int = 2):
+            self.thickness = thickness
+
+        def annotate(self, scene: np.ndarray, detections: _FallbackDetections, **_: Any) -> np.ndarray:
+            for index, box in enumerate(detections.xyxy):
+                x1, y1, x2, y2 = [int(value) for value in box]
+                hue = (int(detections.class_id[index]) * 37) % 180
+                color = tuple(int(value) for value in cv2.cvtColor(np.uint8([[[hue, 210, 240]]]), cv2.COLOR_HSV2BGR)[0, 0])
+                cv2.rectangle(scene, (x1, y1), (x2, y2), color, self.thickness)
+            return scene
+
+    class _FallbackLabelAnnotator:
+        def __init__(self, text_scale: float = 0.55, text_thickness: int = 1):
+            self.text_scale = text_scale
+            self.text_thickness = text_thickness
+
+        def annotate(self, scene: np.ndarray, detections: _FallbackDetections, labels: list[str] | None = None, **_: Any) -> np.ndarray:
+            for index, box in enumerate(detections.xyxy):
+                text = labels[index] if labels and index < len(labels) else "object"
+                x1, y1 = int(box[0]), max(18, int(box[1]) - 6)
+                (width, height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, self.text_scale, self.text_thickness)
+                cv2.rectangle(scene, (x1, y1 - height - 6), (x1 + width + 6, y1 + 2), (25, 35, 55), -1)
+                cv2.putText(scene, text, (x1 + 3, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, self.text_scale, (255, 255, 255), self.text_thickness, cv2.LINE_AA)
+            return scene
+
+    sv = SimpleNamespace(Detections=_FallbackDetections, BoxAnnotator=_FallbackBoxAnnotator, LabelAnnotator=_FallbackLabelAnnotator)
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Image as PdfImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    REPORTLAB_AVAILABLE = True
+except ModuleNotFoundError:
+    # PDF export is an optional reporting enhancement. Keep the dashboards and
+    # all detection APIs operational when a local Python installation lacks it.
+    REPORTLAB_AVAILABLE = False
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,13 +112,27 @@ ACCIDENT_EVIDENCE_DIR = ROOT / "outputs" / "accident_evidence"
 ACCIDENT_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 PDF_DIR = ROOT / "outputs" / "pdf"
 PDF_DIR.mkdir(parents=True, exist_ok=True)
+BACKSCENE_CHECKPOINT_PATH = ROOT / "outputs" / "backscene_checkpoint_demo.json"
+BACKSCENE_PRIORITY_QUEUE_PATH = ROOT / "outputs" / "backscene_priority_queue.json"
+BACKSCENE_EDGE_SYNC_PATH = ROOT / "outputs" / "backscene_edge_sync.json"
 DB_PATH = ROOT / "outputs" / "roadwatch.db"
 ROAD_DAMAGE_INTERVAL_SECONDS = 3.0
 ROAD_DAMAGE_CONFIDENCE = 0.65
 # Ultralytics creates its own "Ultralytics" subfolder inside this configurable base path.
 os.environ.setdefault("YOLO_CONFIG_DIR", str(ROOT))
 
-from ultralytics import YOLO
+# Ultralytics and Torch are intentionally imported only when an inference route
+# is called. This keeps the dashboard available while the heavier model stack
+# initialises, and avoids delaying normal GIS and database operations.
+_yolo_class: Any | None = None
+
+
+def yolo_class() -> Any:
+    global _yolo_class
+    if _yolo_class is None:
+        from ultralytics import YOLO
+        _yolo_class = YOLO
+    return _yolo_class
 
 app = FastAPI(title="RoadWatch GIS", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -84,6 +155,9 @@ road_divider_model_lock = threading.Lock()
 accident_model_lock = threading.Lock()
 road_scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="road-damage")
 db_lock = threading.Lock()
+checkpoint_demo_lock = threading.RLock()
+priority_demo_lock = threading.RLock()
+edge_sync_lock = threading.RLock()
 drivers: dict[str, dict[str, Any]] = {}
 video_jobs: dict[str, dict[str, Any]] = {}
 box_annotator = sv.BoxAnnotator(thickness=2)
@@ -211,12 +285,476 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Backscene resilience demo -------------------------------------------------
+#
+# This is intentionally a small, deterministic frame job rather than a CSS
+# animation.  Its state is atomically persisted so it can demonstrate the
+# exact recovery pattern used for longer asynchronous video work: a worker
+# records the last committed frame, exits at frame 60, and a replacement worker
+# resumes from that checkpoint without sending progress back to zero.
+def _new_checkpoint_demo() -> dict[str, Any]:
+    return {
+        "job_id": None,
+        "status": "idle",
+        "total_frames": 100,
+        "completed_frames": 0,
+        "checkpoint_frame": 0,
+        "failure_frame": 60,
+        "failed_once": False,
+        "workers_started": 0,
+        "active_worker": None,
+        "created_at": None,
+        "updated_at": now(),
+        "events": [],
+    }
+
+
+checkpoint_demo: dict[str, Any] = _new_checkpoint_demo()
+
+
+def _checkpoint_event(state: dict[str, Any], event: str, detail: str, worker: str | None = None) -> None:
+    state["events"] = [
+        *state.get("events", []),
+        {"at": now(), "event": event, "detail": detail, "worker": worker},
+    ][-14:]
+    state["updated_at"] = now()
+
+
+def _save_checkpoint_locked() -> None:
+    """Commit a complete JSON checkpoint with replace(), never a partial file."""
+    BACKSCENE_CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = BACKSCENE_CHECKPOINT_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(checkpoint_demo, indent=2), encoding="utf-8")
+    temporary.replace(BACKSCENE_CHECKPOINT_PATH)
+
+
+def _checkpoint_snapshot() -> dict[str, Any]:
+    with checkpoint_demo_lock:
+        snapshot = json.loads(json.dumps(checkpoint_demo))
+    total = max(1, int(snapshot.get("total_frames", 100)))
+    snapshot["progress_percent"] = round(100 * int(snapshot.get("completed_frames", 0)) / total, 1)
+    snapshot["checkpoint_available"] = BACKSCENE_CHECKPOINT_PATH.exists()
+    snapshot["checkpoint_file"] = "outputs/backscene_checkpoint_demo.json"
+    return snapshot
+
+
+def _launch_checkpoint_worker(resume: bool = False) -> None:
+    """Start one worker against the durable last committed frame."""
+    with checkpoint_demo_lock:
+        if checkpoint_demo["status"] not in {"running", "recovering"}:
+            return
+        checkpoint_demo["workers_started"] += 1
+        worker_name = f"worker-{checkpoint_demo['workers_started']}"
+        checkpoint_demo["active_worker"] = worker_name
+        checkpoint_demo["status"] = "running"
+        start_frame = checkpoint_demo["checkpoint_frame"]
+        if resume:
+            _checkpoint_event(
+                checkpoint_demo,
+                "worker_resumed",
+                f"Replacement resumed from durable checkpoint at frame {start_frame} (no progress reset).",
+                worker_name,
+            )
+        else:
+            _checkpoint_event(checkpoint_demo, "worker_started", "Primary worker started at frame 0.", worker_name)
+        _save_checkpoint_locked()
+    threading.Thread(target=_run_checkpoint_worker, args=(worker_name,), daemon=True, name=f"backscene-{worker_name}").start()
+
+
+def _run_checkpoint_worker(worker_name: str) -> None:
+    """Process a deterministic 100-frame job and deliberately fail worker 1 at 60%."""
+    while True:
+        time.sleep(0.09)
+        with checkpoint_demo_lock:
+            if checkpoint_demo.get("active_worker") != worker_name or checkpoint_demo.get("status") != "running":
+                return
+            completed = int(checkpoint_demo["completed_frames"])
+            # Crash only after frame 60 has already been committed.  The next
+            # worker therefore starts from exactly 60%, not from a UI-only value.
+            if not checkpoint_demo["failed_once"] and completed >= int(checkpoint_demo["failure_frame"]):
+                checkpoint_demo["failed_once"] = True
+                checkpoint_demo["active_worker"] = None
+                checkpoint_demo["status"] = "recovering"
+                _checkpoint_event(
+                    checkpoint_demo,
+                    "worker_failed",
+                    f"{worker_name} stopped unexpectedly after committing frame {completed}. Recovery is being scheduled.",
+                    worker_name,
+                )
+                _save_checkpoint_locked()
+                threading.Timer(0.75, _launch_checkpoint_worker, kwargs={"resume": True}).start()
+                return
+
+            completed += 1
+            checkpoint_demo["completed_frames"] = completed
+            checkpoint_demo["checkpoint_frame"] = completed
+            if completed in {1, 25, 50, 60, 75, 100}:
+                _checkpoint_event(checkpoint_demo, "checkpoint_committed", f"Frame {completed} committed to durable checkpoint.", worker_name)
+            if completed >= int(checkpoint_demo["total_frames"]):
+                checkpoint_demo["active_worker"] = None
+                checkpoint_demo["status"] = "complete"
+                _checkpoint_event(checkpoint_demo, "job_complete", "All 100 frames were processed after checkpoint recovery.", worker_name)
+            _save_checkpoint_locked()
+            if checkpoint_demo["status"] == "complete":
+                return
+
+
+def _resume_checkpoint_demo_from_disk() -> None:
+    """Restore an interrupted demonstration after an API/server restart."""
+    global checkpoint_demo
+    if not BACKSCENE_CHECKPOINT_PATH.exists():
+        return
+    try:
+        loaded = json.loads(BACKSCENE_CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return
+        with checkpoint_demo_lock:
+            checkpoint_demo = {**_new_checkpoint_demo(), **loaded}
+            if checkpoint_demo.get("status") in {"running", "recovering"}:
+                checkpoint_demo["active_worker"] = None
+                checkpoint_demo["status"] = "recovering"
+                _checkpoint_event(
+                    checkpoint_demo,
+                    "server_recovered",
+                    f"Server restored checkpoint at frame {checkpoint_demo.get('checkpoint_frame', 0)}; replacement worker will continue.",
+                )
+                _save_checkpoint_locked()
+                threading.Timer(0.35, _launch_checkpoint_worker, kwargs={"resume": True}).start()
+    except (OSError, json.JSONDecodeError):
+        # A damaged demo file should not prevent the main safety dashboard from starting.
+        checkpoint_demo = _new_checkpoint_demo()
+
+
+# Priority queue and worker-lease demonstration -----------------------------
+# The queue is deliberately independent from live inference. It makes the
+# safety scheduler observable without delaying an actual bus camera stream.
+def _new_priority_demo() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "worker_generation": 0,
+        "active_worker": None,
+        "active_job_id": None,
+        "accident_injected": False,
+        "lease_expires_at": None,
+        "jobs": [],
+        "events": [],
+        "updated_at": now(),
+    }
+
+
+priority_demo: dict[str, Any] = _new_priority_demo()
+
+
+def _priority_event(state: dict[str, Any], event: str, detail: str, job_id: str | None = None, worker: str | None = None) -> None:
+    state["events"] = [*state.get("events", []), {"at": now(), "event": event, "detail": detail, "job_id": job_id, "worker": worker}][-20:]
+    state["updated_at"] = now()
+
+
+def _save_priority_locked() -> None:
+    BACKSCENE_PRIORITY_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = BACKSCENE_PRIORITY_QUEUE_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(priority_demo, indent=2), encoding="utf-8")
+    temporary.replace(BACKSCENE_PRIORITY_QUEUE_PATH)
+
+
+def _priority_snapshot() -> dict[str, Any]:
+    with priority_demo_lock:
+        snapshot = json.loads(json.dumps(priority_demo))
+    snapshot["checkpoint_file"] = "outputs/backscene_priority_queue.json"
+    snapshot["queue_persisted"] = BACKSCENE_PRIORITY_QUEUE_PATH.exists()
+    return snapshot
+
+
+def _job_by_id(job_id: str | None) -> dict[str, Any] | None:
+    return next((job for job in priority_demo.get("jobs", []) if job["id"] == job_id), None)
+
+
+def _next_priority_job() -> dict[str, Any] | None:
+    waiting = [job for job in priority_demo.get("jobs", []) if job["status"] == "queued"]
+    return sorted(waiting, key=lambda job: (-int(job["priority"]), job["created_order"]))[0] if waiting else None
+
+
+def _start_priority_worker(resumed: bool = False) -> None:
+    with priority_demo_lock:
+        if priority_demo.get("status") not in {"running", "lease_expiring"}:
+            return
+        job = _next_priority_job()
+        if job is None:
+            if all(item.get("status") == "done" for item in priority_demo.get("jobs", [])) and priority_demo.get("jobs"):
+                priority_demo["status"] = "complete"
+                _priority_event(priority_demo, "queue_done", "Routine and safety jobs are complete; the queue is idle.")
+                _save_priority_locked()
+            return
+        priority_demo["worker_generation"] += 1
+        worker_name = f"queue-worker-{priority_demo['worker_generation']}"
+        priority_demo["active_worker"] = worker_name
+        priority_demo["active_job_id"] = job["id"]
+        priority_demo["status"] = "running"
+        job["status"] = "claimed"
+        job["worker"] = worker_name
+        job["lease_expires_at"] = time.time() + 1.1
+        event = "resumed" if resumed or int(job.get("attempts", 0)) else "claimed"
+        job["attempts"] = int(job.get("attempts", 0)) + 1
+        _priority_event(priority_demo, event, f"{job['label']} claimed at {job['progress']}%.", job["id"], worker_name)
+        _save_priority_locked()
+    threading.Thread(target=_run_priority_worker, args=(worker_name,), daemon=True, name=worker_name).start()
+
+
+def _run_priority_worker(worker_name: str) -> None:
+    while True:
+        time.sleep(0.085)
+        with priority_demo_lock:
+            if priority_demo.get("active_worker") != worker_name or priority_demo.get("status") != "running":
+                return
+            job = _job_by_id(priority_demo.get("active_job_id"))
+            if job is None or job.get("status") != "claimed":
+                return
+            # Accident evidence has a higher priority than routine scans. Yield
+            # only at a committed frame boundary, then claim the urgent job.
+            accident_waiting = any(item["type"] == "accident" and item["status"] == "queued" for item in priority_demo["jobs"])
+            if job["type"] == "road_scan" and accident_waiting:
+                job["status"] = "queued"
+                job["worker"] = None
+                job["lease_expires_at"] = None
+                priority_demo["active_worker"] = None
+                priority_demo["active_job_id"] = None
+                _priority_event(priority_demo, "priority_jump", "Accident evidence moved ahead of the routine road scan.", job["id"], worker_name)
+                _save_priority_locked()
+                threading.Timer(0.05, _start_priority_worker).start()
+                return
+            job["progress"] = min(100, int(job["progress"]) + 2)
+            job["checkpoint"] = job["progress"]
+            job["lease_expires_at"] = time.time() + 1.1
+            if job["progress"] >= 100:
+                job["status"] = "done"
+                job["worker"] = None
+                job["lease_expires_at"] = None
+                priority_demo["active_worker"] = None
+                priority_demo["active_job_id"] = None
+                _priority_event(priority_demo, "done", f"{job['label']} completed with all committed frames retained.", job["id"], worker_name)
+                _save_priority_locked()
+                threading.Timer(0.05, _start_priority_worker).start()
+                return
+            _save_priority_locked()
+
+
+def _inject_accident_job() -> None:
+    with priority_demo_lock:
+        if priority_demo.get("status") not in {"running", "lease_expiring"} or priority_demo.get("accident_injected"):
+            return
+        priority_demo["accident_injected"] = True
+        priority_demo["jobs"].append({"id": "accident-evidence", "label": "Accident evidence extraction", "type": "accident", "priority": 100, "progress": 0, "checkpoint": 0, "status": "queued", "worker": None, "lease_expires_at": None, "attempts": 0, "created_order": 2})
+        _priority_event(priority_demo, "accident_arrived", "High-priority accident evidence arrived and is eligible to pre-empt routine work.", "accident-evidence")
+        _save_priority_locked()
+
+
+def _expire_priority_lease(generation: int, job_id: str) -> None:
+    with priority_demo_lock:
+        if priority_demo.get("status") != "lease_expiring" or priority_demo.get("worker_generation") != generation:
+            return
+        job = _job_by_id(job_id)
+        if job is None:
+            return
+        job["status"] = "queued"
+        job["worker"] = None
+        job["lease_expires_at"] = None
+        priority_demo["status"] = "running"
+        priority_demo["active_job_id"] = None
+        _priority_event(priority_demo, "lease_expired", f"Worker lease expired. {job['label']} is released at saved {job['checkpoint']}%.", job_id)
+        _save_priority_locked()
+    _start_priority_worker(resumed=True)
+
+
+def _resume_priority_demo_from_disk() -> None:
+    global priority_demo
+    if not BACKSCENE_PRIORITY_QUEUE_PATH.exists():
+        return
+    try:
+        loaded = json.loads(BACKSCENE_PRIORITY_QUEUE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return
+        with priority_demo_lock:
+            priority_demo = {**_new_priority_demo(), **loaded}
+            active = _job_by_id(priority_demo.get("active_job_id"))
+            if priority_demo.get("status") in {"running", "lease_expiring"} and active:
+                active["status"] = "queued"
+                active["worker"] = None
+                active["lease_expires_at"] = None
+                priority_demo["active_worker"] = None
+                priority_demo["active_job_id"] = None
+                priority_demo["status"] = "running"
+                _priority_event(priority_demo, "server_recovered", f"Queue restored from {active['checkpoint']}% checkpoint.", active["id"])
+                _save_priority_locked()
+                threading.Timer(0.25, _start_priority_worker, kwargs={"resumed": True}).start()
+    except (OSError, json.JSONDecodeError):
+        priority_demo = _new_priority_demo()
+
+
+# Offline edge store-and-forward demonstration ------------------------------
+# Captured frames remain local first.  Connectivity only controls delivery to
+# the central platform, so a network interruption never makes the edge camera
+# start again at frame zero.
+def _new_edge_sync_demo() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "network": "online",
+        "capture_running": False,
+        "frame_sequence": 0,
+        "last_ack_sequence": 0,
+        "sync_worker": None,
+        "sync_generation": 0,
+        "queue": [],
+        "delivered": [],
+        "defects": [],
+        "duplicates_prevented": 0,
+        "events": [],
+        "updated_at": now(),
+    }
+
+
+edge_sync_demo: dict[str, Any] = _new_edge_sync_demo()
+
+
+def _edge_event(state: dict[str, Any], event: str, detail: str) -> None:
+    state["events"] = [*state.get("events", []), {"at": now(), "event": event, "detail": detail}][-16:]
+    state["updated_at"] = now()
+
+
+def _save_edge_sync_locked() -> None:
+    BACKSCENE_EDGE_SYNC_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = BACKSCENE_EDGE_SYNC_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(edge_sync_demo, indent=2), encoding="utf-8")
+    temporary.replace(BACKSCENE_EDGE_SYNC_PATH)
+
+
+def _edge_snapshot() -> dict[str, Any]:
+    with edge_sync_lock:
+        snapshot = json.loads(json.dumps(edge_sync_demo))
+    snapshot["queued_count"] = len(snapshot.get("queue", []))
+    snapshot["delivered_count"] = len(snapshot.get("delivered", []))
+    snapshot["store_path"] = "outputs/backscene_edge_sync.json"
+    return snapshot
+
+
+def _distance_metres(left: dict[str, Any], right: dict[str, Any]) -> float:
+    latitude = math.radians(float(right["latitude"]) - float(left["latitude"]))
+    longitude = math.radians(float(right["longitude"]) - float(left["longitude"]))
+    mean_latitude = math.radians((float(left["latitude"]) + float(right["latitude"])) / 2)
+    return 6_371_000 * math.sqrt(latitude * latitude + (math.cos(mean_latitude) * longitude) ** 2)
+
+
+def _merge_spatial_defect_locked(frame: dict[str, Any]) -> None:
+    """Merge same-type pothole observations within 25 m and five minutes."""
+    if frame.get("defect_type") != "Pothole":
+        return
+    for defect in edge_sync_demo["defects"]:
+        within_time = time.time() - float(defect["first_seen_epoch"]) <= 300
+        if defect["type"] == frame["defect_type"] and within_time and _distance_metres(defect, frame) <= 25:
+            if frame["bus"] not in defect["buses"]:
+                defect["buses"].append(frame["bus"])
+                defect["evidence_count"] += 1
+                edge_sync_demo["duplicates_prevented"] += 1
+                _edge_event(edge_sync_demo, "spatial_merge", f"{frame['bus']} matched {defect['id']} within 25 m and 5 minutes; no duplicate pothole was created.")
+            return
+    defect_id = f"POT-{len(edge_sync_demo['defects']) + 1:03d}"
+    edge_sync_demo["defects"].append({"id": defect_id, "type": frame["defect_type"], "latitude": frame["latitude"], "longitude": frame["longitude"], "first_seen_epoch": time.time(), "buses": [frame["bus"]], "evidence_count": 1, "status": "canonical"})
+    _edge_event(edge_sync_demo, "defect_created", f"{defect_id} created from {frame['bus']} observation.")
+
+
+def _capture_edge_frames() -> None:
+    while True:
+        time.sleep(0.23)
+        with edge_sync_lock:
+            if not edge_sync_demo.get("capture_running"):
+                return
+            sequence = int(edge_sync_demo["frame_sequence"]) + 1
+            edge_sync_demo["frame_sequence"] = sequence
+            # Two nearby fleet observations deliberately represent the same
+            # pothole, making spatial duplicate suppression visible in demo.
+            pothole = sequence in {4, 7}
+            frame = {
+                "id": f"edge-frame-{sequence:03d}", "sequence": sequence,
+                "bus": "21A" if sequence != 7 else "47B", "captured_at": now(),
+                "status": "queued", "defect_type": "Pothole" if pothole else "Road frame",
+                "latitude": 13.08270 if sequence != 7 else 13.08277,
+                "longitude": 80.27070 if sequence != 7 else 80.27074,
+            }
+            edge_sync_demo["queue"].append(frame)
+            if pothole:
+                _merge_spatial_defect_locked(frame)
+            if sequence in {1, 4, 7}:
+                _edge_event(edge_sync_demo, "frame_buffered", f"{frame['id']} stored locally before any central upload.")
+            if sequence >= 18:
+                edge_sync_demo["capture_running"] = False
+                _edge_event(edge_sync_demo, "capture_complete", "Edge camera captured 18 frames; remaining entries will drain when online.")
+            _save_edge_sync_locked()
+            should_sync = edge_sync_demo.get("network") == "online" and edge_sync_demo.get("sync_worker") is None
+        if should_sync:
+            _start_edge_sync_worker(resumed=True)
+
+
+def _start_edge_sync_worker(resumed: bool = False) -> None:
+    with edge_sync_lock:
+        if edge_sync_demo.get("network") != "online" or edge_sync_demo.get("sync_worker") is not None or not edge_sync_demo.get("queue"):
+            return
+        edge_sync_demo["sync_generation"] += 1
+        worker = f"sync-worker-{edge_sync_demo['sync_generation']}"
+        edge_sync_demo["sync_worker"] = worker
+        if resumed and edge_sync_demo.get("last_ack_sequence"):
+            _edge_event(edge_sync_demo, "sync_resumed", f"Network restored; sync resumes after acknowledged frame {edge_sync_demo['last_ack_sequence']}.")
+        _save_edge_sync_locked()
+    threading.Thread(target=_run_edge_sync_worker, args=(worker,), daemon=True, name=worker).start()
+
+
+def _run_edge_sync_worker(worker: str) -> None:
+    while True:
+        time.sleep(0.12)
+        with edge_sync_lock:
+            if edge_sync_demo.get("sync_worker") != worker:
+                return
+            if edge_sync_demo.get("network") != "online":
+                edge_sync_demo["sync_worker"] = None
+                _save_edge_sync_locked()
+                return
+            if not edge_sync_demo["queue"]:
+                edge_sync_demo["sync_worker"] = None
+                edge_sync_demo["status"] = "complete" if not edge_sync_demo.get("capture_running") else "streaming"
+                _save_edge_sync_locked()
+                return
+            frame = edge_sync_demo["queue"].pop(0)
+            frame["status"] = "acknowledged"
+            edge_sync_demo["last_ack_sequence"] = frame["sequence"]
+            edge_sync_demo["delivered"].append(frame)
+            if frame["sequence"] in {1, 4, 7, 18}:
+                _edge_event(edge_sync_demo, "frame_acknowledged", f"Central platform acknowledged {frame['id']} exactly once.")
+            _save_edge_sync_locked()
+
+
+def _resume_edge_sync_from_disk() -> None:
+    global edge_sync_demo
+    if not BACKSCENE_EDGE_SYNC_PATH.exists():
+        return
+    try:
+        loaded = json.loads(BACKSCENE_EDGE_SYNC_PATH.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return
+        with edge_sync_lock:
+            edge_sync_demo = {**_new_edge_sync_demo(), **loaded}
+            edge_sync_demo["sync_worker"] = None
+            if edge_sync_demo.get("network") == "online" and edge_sync_demo.get("queue"):
+                _edge_event(edge_sync_demo, "server_recovered", f"Durable edge queue restored; continuation begins after frame {edge_sync_demo.get('last_ack_sequence', 0)}.")
+                _save_edge_sync_locked()
+                threading.Timer(0.25, _start_edge_sync_worker, kwargs={"resumed": True}).start()
+    except (OSError, json.JSONDecodeError):
+        edge_sync_demo = _new_edge_sync_demo()
+
+
 def get_model() -> YOLO:
     global model
     if model is None:
         if not MODEL_PATH.exists():
             raise HTTPException(status_code=500, detail=f"Model not found: {MODEL_PATH.name}")
-        model = YOLO(str(MODEL_PATH))
+        model = yolo_class()(str(MODEL_PATH))
     return model
 
 
@@ -225,7 +763,7 @@ def get_road_damage_model() -> YOLO:
     if road_damage_model is None:
         if not ROAD_DAMAGE_MODEL_PATH.exists():
             raise HTTPException(status_code=500, detail=f"Road-damage model not found: {ROAD_DAMAGE_MODEL_PATH.name}")
-        road_damage_model = YOLO(str(ROAD_DAMAGE_MODEL_PATH))
+        road_damage_model = yolo_class()(str(ROAD_DAMAGE_MODEL_PATH))
     return road_damage_model
 
 
@@ -235,7 +773,7 @@ def get_waterlogging_model() -> YOLO:
     if waterlogging_model is None:
         if not WATERLOGGING_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="Waterlogging model is missing: models/waterlogging/best.pt")
-        waterlogging_model = YOLO(str(WATERLOGGING_MODEL_PATH))
+        waterlogging_model = yolo_class()(str(WATERLOGGING_MODEL_PATH))
     return waterlogging_model
 
 
@@ -245,7 +783,7 @@ def get_speedbreaker_model() -> YOLO:
     if speedbreaker_model is None:
         if not SPEEDBREAKER_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="Speedbreaker model is missing: models/speedbreaker/speedbreaker_best.pt")
-        speedbreaker_model = YOLO(str(SPEEDBREAKER_MODEL_PATH))
+        speedbreaker_model = yolo_class()(str(SPEEDBREAKER_MODEL_PATH))
     return speedbreaker_model
 
 
@@ -255,7 +793,7 @@ def get_zebra_crossing_model() -> YOLO:
     if zebra_crossing_model is None:
         if not ZEBRA_CROSSING_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="Zebra-crossing model is missing: models/zebra_crossing/best.pt")
-        zebra_crossing_model = YOLO(str(ZEBRA_CROSSING_MODEL_PATH))
+        zebra_crossing_model = yolo_class()(str(ZEBRA_CROSSING_MODEL_PATH))
     return zebra_crossing_model
 
 
@@ -265,7 +803,7 @@ def get_road_divider_model() -> YOLO:
     if road_divider_model is None:
         if not ROAD_DIVIDER_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="Road-divider model is missing: models/road_divider/divider.pt")
-        road_divider_model = YOLO(str(ROAD_DIVIDER_MODEL_PATH))
+        road_divider_model = yolo_class()(str(ROAD_DIVIDER_MODEL_PATH))
     return road_divider_model
 
 
@@ -274,7 +812,7 @@ def get_accident_model() -> YOLO:
     if accident_model is None:
         if not ACCIDENT_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="Accident model is missing: models/accident/model.pt")
-        accident_model = YOLO(str(ACCIDENT_MODEL_PATH))
+        accident_model = yolo_class()(str(ACCIDENT_MODEL_PATH))
     return accident_model
 
 
@@ -283,7 +821,7 @@ def get_plate_model() -> YOLO:
     if plate_model is None:
         if not PLATE_MODEL_PATH.exists():
             raise HTTPException(status_code=503, detail="License-plate model is missing: models/lincense_plate/best.pt")
-        plate_model = YOLO(str(PLATE_MODEL_PATH))
+        plate_model = yolo_class()(str(PLATE_MODEL_PATH))
     return plate_model
 
 
@@ -298,7 +836,7 @@ def get_pothole_model() -> YOLO:
             )
         # PyResearch's best.pt uses an older AAttn.qkv layer and is incompatible with current Ultralytics.
         # Use the already-installed RDD YOLOv8 model, constrained to the Potholes class, instead.
-        pothole_model = YOLO(str(POTHOLE_VIDEO_MODEL_PATH))
+        pothole_model = yolo_class()(str(POTHOLE_VIDEO_MODEL_PATH))
     return pothole_model
 
 
@@ -776,6 +1314,265 @@ def driver_dashboard() -> FileResponse:
 @app.get("/government", include_in_schema=False)
 def government_dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "government.html")
+
+
+@app.get("/backscene", include_in_schema=False)
+def backscene_dashboard() -> FileResponse:
+    """Read-only visualisation of the active video-analysis pipeline."""
+    return FileResponse(STATIC_DIR / "backscene.html")
+
+
+@app.on_event("startup")
+def recover_backscene_checkpoint() -> None:
+    """If the service stopped mid-job, continue from its saved frame on boot."""
+    _resume_checkpoint_demo_from_disk()
+    _resume_priority_demo_from_disk()
+    _resume_edge_sync_from_disk()
+
+
+@app.get("/api/backscene/checkpoint-demo")
+def backscene_checkpoint_demo() -> dict[str, Any]:
+    """Return durable worker state for the Backscene recovery visualisation."""
+    return _checkpoint_snapshot()
+
+
+@app.post("/api/backscene/checkpoint-demo/start")
+def start_backscene_checkpoint_demo() -> dict[str, Any]:
+    """Start a new demonstration, or continue a deliberately paused one."""
+    global checkpoint_demo
+    with checkpoint_demo_lock:
+        if checkpoint_demo.get("status") in {"running", "recovering"}:
+            return _checkpoint_snapshot()
+        if checkpoint_demo.get("status") == "paused":
+            checkpoint_demo["status"] = "running"
+            _checkpoint_event(
+                checkpoint_demo,
+                "manual_continue",
+                f"Operator continued from durable frame {checkpoint_demo['checkpoint_frame']} (no reset).",
+            )
+            _save_checkpoint_locked()
+            resume = True
+        else:
+            checkpoint_demo = _new_checkpoint_demo()
+            checkpoint_demo.update({"job_id": uuid.uuid4().hex[:12], "status": "running", "created_at": now()})
+            _checkpoint_event(
+                checkpoint_demo,
+                "job_created",
+                "100-frame resilience job created. Worker 1 will fail after the frame-60 checkpoint.",
+            )
+            _save_checkpoint_locked()
+            resume = False
+    _launch_checkpoint_worker(resume=resume)
+    return _checkpoint_snapshot()
+
+
+@app.post("/api/backscene/checkpoint-demo/pause")
+def pause_backscene_checkpoint_demo() -> dict[str, Any]:
+    """Stop at the last committed frame; the next Continue resumes from it."""
+    with checkpoint_demo_lock:
+        if checkpoint_demo.get("status") != "running" or not checkpoint_demo.get("active_worker"):
+            raise HTTPException(status_code=409, detail="A running checkpoint worker is required before it can be paused.")
+        worker = checkpoint_demo["active_worker"]
+        checkpoint_demo["active_worker"] = None
+        checkpoint_demo["status"] = "paused"
+        _checkpoint_event(
+            checkpoint_demo,
+            "manual_pause",
+            f"Operator paused {worker} at safely committed frame {checkpoint_demo['checkpoint_frame']}.",
+            worker,
+        )
+        _save_checkpoint_locked()
+    return _checkpoint_snapshot()
+
+
+@app.post("/api/backscene/checkpoint-demo/reset")
+def reset_backscene_checkpoint_demo() -> dict[str, Any]:
+    """Clear only the isolated demo state; it never affects driver video jobs."""
+    global checkpoint_demo
+    with checkpoint_demo_lock:
+        checkpoint_demo = _new_checkpoint_demo()
+        try:
+            BACKSCENE_CHECKPOINT_PATH.unlink(missing_ok=True)
+        except OSError:
+            # The next start overwrites the file atomically even if a file lock is transiently held.
+            pass
+    return _checkpoint_snapshot()
+
+
+@app.get("/api/backscene/priority-demo")
+def backscene_priority_demo() -> dict[str, Any]:
+    return _priority_snapshot()
+
+
+@app.post("/api/backscene/priority-demo/start")
+def start_backscene_priority_demo() -> dict[str, Any]:
+    """Queue a routine scan; an accident-evidence job will arrive shortly after."""
+    global priority_demo
+    with priority_demo_lock:
+        if priority_demo.get("status") in {"running", "lease_expiring"}:
+            return _priority_snapshot()
+        priority_demo = _new_priority_demo()
+        priority_demo["status"] = "running"
+        priority_demo["jobs"] = [{"id": "routine-road-scan", "label": "Routine road-condition scan", "type": "road_scan", "priority": 10, "progress": 0, "checkpoint": 0, "status": "queued", "worker": None, "lease_expires_at": None, "attempts": 0, "created_order": 1}]
+        _priority_event(priority_demo, "queued", "Routine road-condition scan queued at normal priority.", "routine-road-scan")
+        _save_priority_locked()
+    _start_priority_worker()
+    # The automatic arrival makes the priority jump visible without requiring
+    # a judge to race a button; the manual endpoint remains available too.
+    threading.Timer(1.65, _inject_accident_job).start()
+    return _priority_snapshot()
+
+
+@app.post("/api/backscene/priority-demo/inject-accident")
+def inject_backscene_accident() -> dict[str, Any]:
+    _inject_accident_job()
+    return _priority_snapshot()
+
+
+@app.post("/api/backscene/priority-demo/kill-worker")
+def kill_backscene_priority_worker() -> dict[str, Any]:
+    """Judge-controlled worker loss: retain its claimed job until lease expiry."""
+    with priority_demo_lock:
+        job = _job_by_id(priority_demo.get("active_job_id"))
+        if priority_demo.get("status") != "running" or job is None:
+            raise HTTPException(status_code=409, detail="No active queue worker is available to terminate.")
+        worker = priority_demo.get("active_worker")
+        generation = int(priority_demo.get("worker_generation", 0))
+        job["status"] = "worker_killed"
+        job["worker"] = None
+        job["lease_expires_at"] = time.time() + 0.9
+        priority_demo["active_worker"] = None
+        priority_demo["status"] = "lease_expiring"
+        priority_demo["lease_expires_at"] = job["lease_expires_at"]
+        _priority_event(priority_demo, "worker_killed", f"Judge terminated {worker}; the claimed job remains protected until its lease expires.", job["id"], worker)
+        _save_priority_locked()
+    threading.Timer(0.92, _expire_priority_lease, args=(generation, job["id"])).start()
+    return _priority_snapshot()
+
+
+@app.post("/api/backscene/priority-demo/reset")
+def reset_backscene_priority_demo() -> dict[str, Any]:
+    global priority_demo
+    with priority_demo_lock:
+        priority_demo = _new_priority_demo()
+        try:
+            BACKSCENE_PRIORITY_QUEUE_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return _priority_snapshot()
+
+
+@app.get("/api/backscene/edge-sync-demo")
+def backscene_edge_sync_demo() -> dict[str, Any]:
+    return _edge_snapshot()
+
+
+@app.post("/api/backscene/edge-sync-demo/start")
+def start_backscene_edge_sync_demo() -> dict[str, Any]:
+    """Start local frame capture; delivery remains independent of capture."""
+    global edge_sync_demo
+    with edge_sync_lock:
+        if edge_sync_demo.get("capture_running") or edge_sync_demo.get("queue"):
+            return _edge_snapshot()
+        edge_sync_demo = _new_edge_sync_demo()
+        edge_sync_demo["status"] = "streaming"
+        edge_sync_demo["capture_running"] = True
+        _edge_event(edge_sync_demo, "edge_started", "Edge capture started. Frames are written locally before network delivery.")
+        _save_edge_sync_locked()
+    threading.Thread(target=_capture_edge_frames, daemon=True, name="edge-capture").start()
+    return _edge_snapshot()
+
+
+@app.post("/api/backscene/edge-sync-demo/go-offline")
+def backscene_go_offline() -> dict[str, Any]:
+    with edge_sync_lock:
+        edge_sync_demo["network"] = "offline"
+        edge_sync_demo["status"] = "offline_buffering"
+        _edge_event(edge_sync_demo, "network_lost", f"Network unavailable. {len(edge_sync_demo['queue'])} local frame(s) retained in the durable edge queue.")
+        _save_edge_sync_locked()
+    return _edge_snapshot()
+
+
+@app.post("/api/backscene/edge-sync-demo/go-online")
+def backscene_go_online() -> dict[str, Any]:
+    with edge_sync_lock:
+        edge_sync_demo["network"] = "online"
+        edge_sync_demo["status"] = "syncing"
+        _edge_event(edge_sync_demo, "network_restored", f"Network restored. Continuing after acknowledged frame {edge_sync_demo.get('last_ack_sequence', 0)}.")
+        _save_edge_sync_locked()
+    _start_edge_sync_worker(resumed=True)
+    return _edge_snapshot()
+
+
+@app.post("/api/backscene/edge-sync-demo/reset")
+def reset_backscene_edge_sync_demo() -> dict[str, Any]:
+    global edge_sync_demo
+    with edge_sync_lock:
+        edge_sync_demo = _new_edge_sync_demo()
+        try:
+            BACKSCENE_EDGE_SYNC_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return _edge_snapshot()
+
+
+@app.get("/api/backscene")
+def backscene_telemetry() -> dict[str, Any]:
+    """Compact, read-only pipeline status for the Backscene AI dashboard.
+
+    This deliberately reuses existing live-driver state and does not change the
+    detection pipeline, database events, or driver/government dashboard data.
+    """
+    model_catalog = [
+        {"id": "objects", "label": "General object detector", "file": MODEL_PATH.name, "purpose": "Vehicle, pedestrian, class count and density", "interval": "Sampled live frames", "available": MODEL_PATH.exists()},
+        {"id": "road_damage", "label": "Road damage YOLOv8", "file": ROAD_DAMAGE_MODEL_PATH.name, "purpose": "Potholes and road-damage candidates", "interval": "Every 3 seconds", "available": ROAD_DAMAGE_MODEL_PATH.exists()},
+        {"id": "waterlogging", "label": "Waterlogging detector", "file": WATERLOGGING_MODEL_PATH.name, "purpose": "Waterlogged-road candidates", "interval": "Every 3 seconds", "available": WATERLOGGING_MODEL_PATH.exists()},
+        {"id": "speedbreaker", "label": "Speedbreaker detector", "file": SPEEDBREAKER_MODEL_PATH.name, "purpose": "Speedbreaker inventory", "interval": "Every 3 seconds", "available": SPEEDBREAKER_MODEL_PATH.exists()},
+        {"id": "zebra", "label": "Zebra-crossing detector", "file": ZEBRA_CROSSING_MODEL_PATH.name, "purpose": "Crossing inventory", "interval": "Every 4 seconds", "available": ZEBRA_CROSSING_MODEL_PATH.exists()},
+        {"id": "divider", "label": "Road-divider detector", "file": ROAD_DIVIDER_MODEL_PATH.name, "purpose": "Divider-present inventory", "interval": "Every 5 seconds", "available": ROAD_DIVIDER_MODEL_PATH.exists()},
+        {"id": "accident", "label": "Accident and plate evidence", "file": ACCIDENT_MODEL_PATH.name, "purpose": "Incident cue and authorised evidence", "interval": "Independent low-priority scan", "available": ACCIDENT_MODEL_PATH.exists()},
+    ]
+    vehicles = []
+    for record in drivers.values():
+        analysis = record.get("analysis", {})
+        detections = record.get("detections", [])
+        road_modules = {
+            "road_damage": record.get("road_damage", {}),
+            "waterlogging": record.get("waterlogging", {}),
+            "speedbreaker": record.get("speedbreakers", {}),
+            "zebra": record.get("zebra_crossings", {}),
+            "divider": record.get("road_dividers", {}),
+            "accident": record.get("accident", {}),
+        }
+        active_models = ["General object detector"] if record.get("last_seen") else []
+        for model_id, detail in road_modules.items():
+            if detail.get("last_scanned"):
+                matched = next((item["label"] for item in model_catalog if item["id"] == model_id), model_id)
+                active_models.append(matched)
+        vehicles.append({
+            "driver_id": record.get("driver_id"),
+            "last_seen": record.get("last_seen"),
+            "latitude": record.get("latitude"),
+            "longitude": record.get("longitude"),
+            "scans": record.get("scans", 0),
+            "frame": record.get("last_frame"),
+            "detections": detections,
+            "counts": analysis.get("counts", {}),
+            "density": analysis.get("density", "Unknown"),
+            "vehicle_count": analysis.get("vehicle_count", 0),
+            "person_count": analysis.get("person_count", 0),
+            "alerts": analysis.get("alerts", []),
+            "tracking": analysis.get("tracking", {}),
+            "road_modules": road_modules,
+            "active_models": active_models,
+        })
+    return {"timestamp": now(), "models": model_catalog, "vehicles": vehicles, "pipeline": [
+        {"step": "01", "name": "Capture frame", "detail": "Video or camera stays playing while a sampled frame is copied for AI."},
+        {"step": "02", "name": "Call model", "detail": "The primary object detector runs first; specialist road models are scheduled independently."},
+        {"step": "03", "name": "Apply boxes", "detail": "Classes and confidence are drawn on the returned frame without pausing playback."},
+        {"step": "04", "name": "Track and count", "detail": "Persistent vehicle IDs, class counts and density are calculated from stable detections."},
+        {"step": "05", "name": "Publish event", "detail": "A compact GPS-linked event updates the government map and operational queues."},
+    ]}
 
 
 @app.get("/api/health")
@@ -1319,6 +2116,8 @@ def accident_evidence(filename: str) -> FileResponse:
 @app.get("/api/accidents/{incident_id}/report.pdf")
 def accident_report(incident_id: int) -> FileResponse:
     """Create an official, evidence-backed incident briefing for traffic-authority review."""
+    if not REPORTLAB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="PDF reporting is unavailable because the ReportLab package is not installed on this computer.")
     with db_lock, database() as connection:
         incident = connection.execute("SELECT * FROM accident_incidents WHERE id = ?", (incident_id,)).fetchone()
     if incident is None:

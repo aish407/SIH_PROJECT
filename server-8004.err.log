@@ -1,0 +1,5 @@
+Failed to find real location of C:\Program Files\Python314\python.exe
+  File "<string>", line 1
+    import
+          ^
+SyntaxError: Expected one or more names after 'import'

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Backscene AI | MovIqSense</title>
+  <link rel="stylesheet" href="/static/styles.css"><link rel="stylesheet" href="/static/backscene.css"><link rel="stylesheet" href="/static/backscene-resilience.css"><link rel="stylesheet" href="/static/backscene-controls.css"><link rel="stylesheet" href="/static/backscene-priority.css"><link rel="stylesheet" href="/static/backscene-edge.css">
+</head>
+<body class="backscene-page">
+  <header class="backscene-topbar">
+    <a class="brand" href="/backscene"><span class="brand-icon">✦</span><span><b>Backscene AI</b><small>MovIqSense inference observability</small></span></a>
+    <div class="top-actions"><span class="live-dot">● LIVE PIPELINE</span><a class="route-link" href="/driver">Driver panel</a><a class="route-link" href="/government">Government dashboard</a></div>
+  </header>
+
+  <main class="backscene-main">
+    <section class="backscene-hero">
+      <div><span class="kicker">EXPLAINABLE LIVE AI</span><h1>See every frame become an actionable city signal.</h1><p>Backscene shows how MovIqSense samples video, calls the right model, applies bounding boxes, counts objects, and sends a compact update to the Government Dashboard.</p></div>
+      <div class="hero-state"><span id="connectionDot">●</span><b id="connectionState">Connecting</b><small id="lastRefresh">Waiting for telemetry</small></div>
+    </section>
+
+    <section class="backscene-grid">
+      <article class="back-card stage-card">
+        <div class="section-label"><span>01</span><div><h2>Live frame and bounding boxes</h2><p>Same annotated frame the driver dashboard receives</p></div><em id="frameStatus">WAITING</em></div>
+        <div class="frame-shell"><img id="liveFrame" alt="Latest annotated live detection frame"><div id="emptyFrame"><b>Waiting for a driver video or camera</b><span>Start detection in the Driver panel to see the real-time AI pipeline here.</span></div><div class="frame-hud"><span id="frameBus">NO ACTIVE BUS</span><span id="frameScan">0 SCANS</span></div></div>
+        <div class="frame-caption"><span>Frame delivery is non-blocking</span><b id="frameCount">0 objects in latest inference</b></div>
+      </article>
+
+      <aside class="back-card model-card">
+        <div class="section-label"><span>02</span><div><h2>Model orchestration</h2><p>Independent model calls prevent overlap and playback lag</p></div></div>
+        <div id="modelList" class="model-list"><span class="muted">Loading model registry…</span></div>
+      </aside>
+
+      <article class="back-card pipeline-card">
+        <div class="section-label"><span>03</span><div><h2>Frame to government workflow</h2><p>Every stage is visible and measurable</p></div></div>
+        <div id="pipelineSteps" class="pipeline-steps"></div>
+      </article>
+
+      <article class="back-card resilience-card">
+        <div class="section-label"><span>04</span><div><h2>Checkpoint resume and live progress</h2><p>Durable frame checkpoints prove that a failed worker can continue without losing work</p></div><em id="checkpointStatus">IDLE</em></div>
+        <div class="resilience-layout">
+          <section class="checkpoint-visual" aria-live="polite">
+            <div class="checkpoint-heading"><div><small>FRAME PROCESSING PROGRESS</small><b id="checkpointProgress">0%</b></div><span id="checkpointFrame">0 / 100 frames committed</span></div>
+            <div class="progress-track"><div id="checkpointBar" class="progress-bar" style="width:0%"></div><i class="failure-mark" title="Worker failure checkpoint">60%</i></div>
+            <div class="checkpoint-scale"><span>0% start</span><span>60% failure checkpoint</span><span>100% complete</span></div>
+            <div class="worker-handoff"><div class="worker-node"><span>1</span><b>Primary worker</b><small id="primaryWorker">Waiting to start</small></div><div class="handoff-arrow">→<small>durable checkpoint</small></div><div class="worker-node replacement"><span>2</span><b>Recovery worker</b><small id="recoveryWorker">Ready if needed</small></div></div>
+          </section>
+          <section class="checkpoint-side">
+            <div class="checkpoint-metrics"><div><small>LAST SAVED</small><b id="checkpointSaved">Frame 0</b></div><div><small>ACTIVE WORKER</small><b id="checkpointWorker">—</b></div><div><small>WORKERS USED</small><b id="checkpointWorkers">0</b></div></div>
+            <div class="checkpoint-actions"><button id="startCheckpointDemo" type="button">Run failure demo</button><button id="pauseCheckpointDemo" class="pause" type="button">Pause at checkpoint</button><button id="resetCheckpointDemo" class="secondary" type="button">Reset</button></div>
+            <p class="checkpoint-note">Use Pause to freeze at the exact saved frame. Continue starts a replacement worker from that checkpoint; it never returns to Frame 0. The automatic failure at 60% remains available for the resilience demo.</p>
+          </section>
+        </div>
+        <div id="checkpointEvents" class="checkpoint-events"><span class="muted">Run the demonstration to see the durable event log.</span></div>
+      </article>
+
+      <article class="back-card priority-card">
+        <div class="section-label"><span>05</span><div><h2>Safety-priority queue and worker lease</h2><p>Accident evidence pre-empts routine work; judges can test recovery by terminating the worker</p></div><em id="priorityStatus">IDLE</em></div>
+        <div class="priority-layout">
+          <section class="queue-jobs">
+            <div class="queue-title"><div><small>LIVE JOB QUEUE</small><b>Priority-aware scheduler</b></div><span id="queueWorker">No worker claimed</span></div>
+            <div id="priorityJobs" class="priority-jobs"><span class="muted">Start the queue demonstration to create a routine road scan.</span></div>
+          </section>
+          <section class="timeline-area">
+            <div class="timeline-title"><small>FAULT-TOLERANCE TIMELINE</small><b>Claimed → Worker Killed → Lease Expired → Resumed → Done</b></div>
+            <div id="priorityTimeline" class="priority-timeline"><span class="muted">The worker lifecycle will appear here.</span></div>
+          </section>
+        </div>
+        <div class="priority-actions"><button id="startPriorityDemo" type="button">Start routine road scan</button><button id="injectAccident" class="warning" type="button">Inject accident evidence</button><button id="killPriorityWorker" class="danger" type="button">Kill active worker</button><button id="resetPriorityDemo" class="secondary" type="button">Reset queue</button></div>
+        <p class="priority-note">The normal scan starts first. Accident evidence is injected automatically after a moment, then takes priority. “Kill active worker” is safe: it only affects this isolated observable demo, never live bus inference.</p>
+      </article>
+
+      <article class="back-card edge-card">
+        <div class="section-label"><span>06</span><div><h2>Offline edge queue, resume and spatial merge</h2><p>Frames keep collecting without connectivity; central delivery continues exactly after the last acknowledgement</p></div><em id="edgeStatus">IDLE</em></div>
+        <div class="edge-layout">
+          <section class="network-console"><div class="network-state"><span id="networkLamp">●</span><div><small>NETWORK LINK</small><b id="networkState">ONLINE</b></div><div class="sequence-readout"><small>LAST ACKNOWLEDGED</small><b id="edgeAck">Frame 0</b></div></div><div class="edge-progress"><span>Captured <b id="edgeCaptured">0</b></span><span>Queued <b id="edgeQueued">0</b></span><span>Delivered <b id="edgeDelivered">0</b></span></div><div id="edgeQueue" class="edge-queue"><span class="muted">Start edge capture to see durable frame entries.</span></div></section>
+          <section class="dedupe-console"><div class="dedupe-title"><small>SPATIAL DUPLICATE DETECTION</small><b>Canonical road-defect records</b></div><div id="dedupeDefects" class="dedupe-defects"><span class="muted">Nearby observations will merge here.</span></div><div class="dedupe-result"><span>Duplicates prevented</span><b id="duplicatesPrevented">0</b><small>same type + ≤25 m + ≤5 min</small></div></section>
+        </div>
+        <div class="edge-actions"><button id="startEdgeDemo" type="button">Start edge capture</button><button id="goOffline" class="offline" type="button">Simulate no network</button><button id="goOnline" class="online" type="button">Restore network &amp; resume</button><button id="resetEdgeDemo" class="secondary" type="button">Reset</button></div>
+        <div id="edgeEvents" class="edge-events"><span class="muted">When offline, buffered frames and merge decisions will be shown here.</span></div>
+        <p class="edge-note"><b>What judges should notice:</b> disconnecting does not stop capture or erase progress. The queue is stored locally, and reconnecting transmits only frames after the last central acknowledgement—while nearby reports of the same pothole merge into one authoritative record.</p>
+      </article>
+
+      <article class="back-card intelligence-card">
+        <div class="section-label"><span>07</span><div><h2>Counting and live intelligence</h2><p>Outputs published from the active inference frame</p></div></div>
+        <div class="intelligence-metrics"><div><small>OBJECTS</small><b id="objectTotal">0</b><span>latest frame</span></div><div><small>VEHICLES</small><b id="vehicleTotal">0</b><span>tracked classes</span></div><div><small>PEDESTRIANS</small><b id="personTotal">0</b><span>latest frame</span></div><div><small>DENSITY</small><b id="densityTotal">–</b><span>scene indicator</span></div></div>
+        <div class="count-panels"><section><h3>Class counter</h3><div id="classCounts" class="chips"><span class="muted">No live count yet.</span></div></section><section><h3>Tracker state</h3><div id="trackingState" class="tracker-state"><span class="muted">Waiting for consecutive detections.</span></div></section></div>
+      </article>
+
+      <article class="back-card publish-card">
+        <div class="section-label"><span>08</span><div><h2>Government dashboard handoff</h2><p>Compact events are shared instead of streaming every full video frame</p></div><a class="mini-link" href="/government">Open dashboard →</a></div>
+        <div class="handoff-grid"><div><small>BUS ID</small><b id="handoffBus">–</b></div><div><small>LOCATION</small><b id="handoffLocation">Waiting for GPS</b></div><div><small>ACTIVE MODELS</small><b id="handoffModels">None</b></div><div><small>EVENT STATUS</small><b id="handoffEvent">Waiting for inference</b></div></div>
+        <div class="publish-note"><span>✓</span><p><b>Why this remains smooth:</b> video playback is continuous; the latest stable boxes are reused between sampled inference frames; independent specialist models run on scheduled intervals.</p></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="backscene-footer"><span>MovIqSense • Explainable edge-to-GIS intelligence</span><span>Read-only observability dashboard • No control changes are made here</span></footer>
+  <script src="/static/backscene.js"></script>
+</body>
+</html>
